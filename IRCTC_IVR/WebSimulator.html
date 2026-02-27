@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>IRCTC IVR Simulator</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #fff; }
+    h2 { margin-bottom: 5px; }
+    #log { border: 1px solid #000; padding: 10px; height: 200px; overflow-y: scroll; margin-bottom: 10px; white-space: pre; font-size: 13px; }
+    #twiml { border: 1px solid #999; padding: 10px; height: 150px; overflow-y: scroll; margin-bottom: 10px; white-space: pre; font-size: 12px; background: #f9f9f9; }
+    .keypad button { width: 60px; height: 50px; font-size: 18px; margin: 3px; cursor: pointer; }
+    button { cursor: pointer; }
+    #status { font-weight: bold; margin-bottom: 8px; }
+    #digitDisplay { font-size: 20px; letter-spacing: 4px; margin: 8px 0; min-height: 28px; }
+    .quick { font-size: 12px; margin: 5px 0; }
+    .quick button { font-size: 11px; padding: 3px 6px; margin: 2px; }
+    hr { margin: 12px 0; }
+  </style>
+</head>
+<body>
+
+<h2>IRCTC IVR Simulator</h2>
+<div id="status">Status: IDLE</div>
+<div id="digitDisplay"></div>
+
+<button onclick="startCall()">CALL</button>
+<button onclick="hangUp()">HANG UP</button>
+
+<hr>
+
+<div class="keypad">
+  <button onclick="pressKey('1')">1</button>
+  <button onclick="pressKey('2')">2</button>
+  <button onclick="pressKey('3')">3</button><br>
+  <button onclick="pressKey('4')">4</button>
+  <button onclick="pressKey('5')">5</button>
+  <button onclick="pressKey('6')">6</button><br>
+  <button onclick="pressKey('7')">7</button>
+  <button onclick="pressKey('8')">8</button>
+  <button onclick="pressKey('9')">9</button><br>
+  <button onclick="pressKey('*')">*</button>
+  <button onclick="pressKey('0')">0</button>
+  <button onclick="pressKey('#')">#</button>
+</div>
+
+<div class="quick" id="quickArea"></div>
+
+<hr>
+
+<b>IVR Output:</b>
+<div id="log"></div>
+
+<b>Last TwiML:</b>
+<div id="twiml"></div>
+
+<script>
+const PNR_DB = {
+  "2154673890": { train_name:"Rajdhani Express", train_number:"12952", from_station:"New Delhi", to_station:"Mumbai Central", journey_date:"25 Feb 2026", status:"Confirmed", coach:"A1", berth:"23, Lower" },
+  "4521987630": { train_name:"Shatabdi Express", train_number:"12001", from_station:"Bhopal Jn", to_station:"New Delhi", journey_date:"26 Feb 2026", status:"Waitlisted WL4", coach:"Not Assigned", berth:"Not Assigned" },
+  "7893214560": { train_name:"Duronto Express", train_number:"12213", from_station:"Patna Jn", to_station:"Mumbai LTT", journey_date:"28 Feb 2026", status:"Confirmed", coach:"B3", berth:"47, Side Upper" },
+  "3347821905": { train_name:"Vande Bharat Express", train_number:"22439", from_station:"Varanasi Jn", to_station:"New Delhi", journey_date:"27 Feb 2026", status:"RAC 2", coach:"C1", berth:"RAC 2" },
+  "9012345678": { train_name:"Garib Rath Express", train_number:"12216", from_station:"Chandigarh", to_station:"Mumbai Bandra", journey_date:"01 Mar 2026", status:"Confirmed", coach:"GR-3", berth:"12, Upper" },
+};
+
+const TRAIN_DB = {
+  "12952": { name:"Mumbai Rajdhani Express", source:"New Delhi", destination:"Mumbai Central", departure:"4:55 PM", arrival:"8:35 AM+1", days:"Mon, Wed, Fri, Sat" },
+  "12001": { name:"Bhopal Shatabdi Express", source:"New Delhi", destination:"Bhopal Jn", departure:"6:00 AM", arrival:"2:30 PM", days:"Daily except Tue" },
+  "12213": { name:"Patna Duronto Express", source:"Patna Jn", destination:"Mumbai LTT", departure:"3:30 PM", arrival:"10:00 AM+1", days:"Tue, Thu, Sun" },
+  "22439": { name:"Vande Bharat Express", source:"New Delhi", destination:"Varanasi Jn", departure:"8:00 AM", arrival:"2:00 PM", days:"Daily except Wed" },
+  "12216": { name:"Garib Rath Express", source:"Chandigarh", destination:"Mumbai Bandra", departure:"9:10 PM", arrival:"11:50 PM+1", days:"Mon, Fri" },
+};
+
+let phase = 'idle', digits = '';
+
+function log(msg) {
+  const d = document.getElementById('log');
+  d.textContent += msg + '\n';
+  d.scrollTop = d.scrollHeight;
+}
+
+function setTwiML(xml) {
+  document.getElementById('twiml').textContent = xml;
+}
+
+function setStatus(s) {
+  document.getElementById('status').textContent = 'Status: ' + s;
+}
+
+function setDigits(d) {
+  document.getElementById('digitDisplay').textContent = d;
+}
+
+function clearLog() {
+  document.getElementById('log').textContent = '';
+}
+
+function showQuickPNR() {
+  document.getElementById('quickArea').innerHTML =
+    'Sample PNRs: ' + Object.keys(PNR_DB).map(p =>
+      `<button onclick="quickFill('${p}')">${p}</button>`).join(' ');
+}
+
+function showQuickTrain() {
+  document.getElementById('quickArea').innerHTML =
+    'Sample Trains: ' + Object.keys(TRAIN_DB).map(t =>
+      `<button onclick="quickFill('${t}')">${t}</button>`).join(' ');
+}
+
+function clearQuick() {
+  document.getElementById('quickArea').innerHTML = '';
+}
+
+function quickFill(val) {
+  digits = val;
+  setDigits(digits);
+  setTimeout(submitDigits, 300);
+}
+
+function startCall() {
+  phase = 'main_menu'; digits = '';
+  clearLog(); clearQuick(); setDigits('');
+  setStatus('CONNECTED');
+  log('[POST /voice -> 200 OK]');
+  log('> Namaste! Welcome to IRCTC Passenger Services.');
+  log('> Press 1 for PNR Status.');
+  log('> Press 2 for Train Information.');
+  log('> Press 9 to Exit.');
+  setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Gather action="/handle-menu" numDigits="1">\n    <Say>Namaste! Press 1 PNR, 2 Train Info, 9 Exit.</Say>\n  </Gather>\n  <Redirect>/voice</Redirect>\n</Response>`);
+}
+
+function hangUp() {
+  phase = 'idle'; digits = '';
+  setStatus('IDLE'); setDigits(''); clearQuick();
+  log('[CALL ENDED]');
+  setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Say>Thank you. Goodbye!</Say>\n  <Hangup/>\n</Response>`);
+}
+
+function pressKey(d) {
+  if (phase === 'idle') return;
+
+  if (phase === 'main_menu') {
+    log('< You pressed: ' + d);
+    if (d === '1') {
+      phase = 'pnr_gather'; digits = '';
+      log('[POST /handle-menu -> 200 OK]');
+      log('> Enter your 10-digit PNR number then press #');
+      setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Gather action="/handle-pnr" numDigits="10">\n    <Say>Enter 10-digit PNR then press hash.</Say>\n  </Gather>\n</Response>`);
+      showQuickPNR();
+    } else if (d === '2') {
+      phase = 'train_gather'; digits = '';
+      log('[POST /handle-menu -> 200 OK]');
+      log('> Enter the 5-digit train number then press #');
+      setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Gather action="/handle-train" numDigits="5">\n    <Say>Enter 5-digit train number then press hash.</Say>\n  </Gather>\n</Response>`);
+      showQuickTrain();
+    } else if (d === '9') {
+      log('[POST /handle-menu -> 200 OK]');
+      hangUp();
+    } else {
+      log('[POST /handle-menu -> 200 OK]');
+      log('> Invalid input. Redirecting to main menu...');
+      setTimeout(startCall, 1000);
+    }
+    return;
+  }
+
+  if (phase === 'pnr_gather' || phase === 'train_gather') {
+    const maxLen = phase === 'pnr_gather' ? 10 : 5;
+    if (d === '#') { submitDigits(); return; }
+    if (d === '*') { digits = digits.slice(0,-1); setDigits(digits); return; }
+    if (digits.length < maxLen) {
+      digits += d;
+      setDigits(digits);
+      if (digits.length === maxLen) setTimeout(submitDigits, 400);
+    }
+    return;
+  }
+
+  if (phase === 'pnr_result' || phase === 'train_result') {
+    log('< You pressed: ' + d);
+    const endpoint = phase === 'pnr_result' ? '/handle-pnr-options' : '/handle-train-options';
+    log(`[POST ${endpoint} -> 200 OK]`);
+    if (d === '1') {
+      const nextPhase = phase === 'pnr_result' ? 'pnr_gather' : 'train_gather';
+      phase = nextPhase; digits = ''; setDigits(''); clearQuick();
+      log('> Enter number then press #');
+      phase === 'pnr_gather' ? showQuickPNR() : showQuickTrain();
+    } else if (d === '2') {
+      startCall();
+    } else if (d === '9') {
+      hangUp();
+    }
+  }
+}
+
+function submitDigits() {
+  clearQuick();
+  if (phase === 'pnr_gather') {
+    log('< PNR entered: ' + digits);
+    log('[POST /handle-pnr -> 200 OK]');
+    const r = PNR_DB[digits];
+    if (r) {
+      log('> Train: ' + r.train_name + ' (' + r.train_number + ')');
+      log('> Route: ' + r.from_station + ' to ' + r.to_station);
+      log('> Date: ' + r.journey_date);
+      log('> Status: ' + r.status);
+      log('> Coach: ' + r.coach + ' | Berth: ' + r.berth);
+      setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Say>PNR ${digits}. Train: ${r.train_name}. Status: ${r.status}. Coach ${r.coach}, Berth ${r.berth}.</Say>\n  <Gather action="/handle-pnr-options" numDigits="1">\n    <Say>Press 1 another PNR, 2 main menu, 9 exit.</Say>\n  </Gather>\n</Response>`);
+    } else {
+      log('> No record found for PNR: ' + digits);
+      setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Say>No record found. Please try again.</Say>\n  <Redirect>/voice</Redirect>\n</Response>`);
+    }
+    log('> Press 1=Another PNR | 2=Main Menu | 9=Exit');
+    phase = 'pnr_result';
+
+  } else if (phase === 'train_gather') {
+    log('< Train number entered: ' + digits);
+    log('[POST /handle-train -> 200 OK]');
+    const r = TRAIN_DB[digits];
+    if (r) {
+      log('> Train: ' + r.name);
+      log('> Route: ' + r.source + ' to ' + r.destination);
+      log('> Departs: ' + r.departure + ' | Arrives: ' + r.arrival);
+      log('> Runs: ' + r.days);
+      setTwiML(`<?xml version="1.0"?>\n<Response>\n  <Say>Train ${digits}: ${r.name}. ${r.source} to ${r.destination}. Departs ${r.departure}, arrives ${r.arrival}.</Say>\n  <Gather action="/handle-train-options" numDigits="1">\n    <Say>Press 1 another train, 2 main menu, 9 exit.</Say>\n  </Gather>\n</Response>`);
+    } else {
+      log('> No info found for train: ' + digits);
+    }
+    log('> Press 1=Another Train | 2=Main Menu | 9=Exit');
+    phase = 'train_result';
+  }
+
+  digits = '';
+  setDigits('');
+}
+</script>
+</body>
+</html>
