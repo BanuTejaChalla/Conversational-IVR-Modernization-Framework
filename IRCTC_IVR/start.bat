@@ -1,2 +1,0 @@
-start cmd /k uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-start cmd /k "C:\Users\banut\AppData\Local\Microsoft\WinGet\Packages\Ngrok.Ngrok_Microsoft.Winget.Source_8wekyb3d8bbwe\ngrok.exe" http 8000
